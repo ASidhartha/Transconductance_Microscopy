@@ -1,0 +1,66 @@
+{
+ "pure/C=C / amide C=O": {
+  "n": 55,
+  "n_sign_agree": 40,
+  "pos_agree": 30,
+  "neg_agree": 10,
+  "p_sign": 0.0022214337732293643,
+  "median_nA": 1.6074822791145766
+ },
+ "impure/C=C / amide C=O": {
+  "n": 55,
+  "n_sign_agree": 37,
+  "pos_agree": 25,
+  "neg_agree": 12,
+  "p_sign": 0.04703102743951604,
+  "median_nA": 7.337810037792951
+ },
+ "pure/N=C=S": {
+  "n": 55,
+  "n_sign_agree": 41,
+  "pos_agree": 13,
+  "neg_agree": 28,
+  "p_sign": 0.027533155829587486,
+  "median_nA": -1.397801305467607
+ },
+ "impure/N=C=S": {
+  "n": 55,
+  "n_sign_agree": 37,
+  "pos_agree": 19,
+  "neg_agree": 18,
+  "p_sign": 1.0,
+  "median_nA": 0.7888054973226468
+ },
+ "pure/S\u2013C\u2261N": {
+  "n": 55,
+  "n_sign_agree": 34,
+  "pos_agree": 9,
+  "neg_agree": 25,
+  "p_sign": 0.00904118549078703,
+  "median_nA": -0.7748431295439456
+ },
+ "impure/S\u2013C\u2261N": {
+  "n": 55,
+  "n_sign_agree": 30,
+  "pos_agree": 12,
+  "neg_agree": 18,
+  "p_sign": 0.36159460805356514,
+  "median_nA": -1.4218595680634456
+ },
+ "pure/carboxylic O\u2013H": {
+  "n": 55,
+  "n_sign_agree": 38,
+  "pos_agree": 28,
+  "neg_agree": 10,
+  "p_sign": 0.0050976432976312935,
+  "median_nA": 4.927414872404939
+ },
+ "impure/carboxylic O\u2013H": {
+  "n": 55,
+  "n_sign_agree": 34,
+  "pos_agree": 20,
+  "neg_agree": 14,
+  "p_sign": 0.39152830513194203,
+  "median_nA": 3.807043355829342
+ }
+}

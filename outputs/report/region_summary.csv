@@ -1,0 +1,10 @@
+region,lo,hi,description,impure_high,impure_any,pure_high,pure_any,dup_high,dup_any,p,p_holm
+< 400,200,400,Below the FTIR table: lattice / metal–oxide modes,11,16,6,11,0,0,0.29053920886933093,1.0
+400–900,400,900,"M–O stretch, C–halogen stretch, aromatic C–H out-of-plane bend",19,22,23,28,1,1,0.5540115554804357,1.0
+900–1350,900,1350,"Fingerprint: C–O, C–N, C–F, S=O stretch; C=C bend",7,9,19,26,1,1,0.012373073252124625,0.098984586016997
+1350–1500,1350,1500,C–H and O–H bending; N–O stretch,8,11,6,7,0,0,0.7755469190923241,1.0
+1500–1800,1500,1800,"C=C, C=O (incl. amide, carboxylic) stretch; N–H bend",16,23,12,14,0,0,0.5105327381612247,1.0
+1800–2300,1800,2300,"Triple / cumulated bonds: C≡N, C≡C, N=C=S, S–C≡N, N=N=N",16,18,8,12,0,0,0.10400559066751214,0.5200279533375607
+2300–2500,2300,2500,No entry in the FTIR table (CO₂ ≈ 2349 is one candidate),13,14,1,1,0,0,0.0009029314160646818,0.008126382744582135
+2500–3000,2500,3000,"Carboxylic O–H, C–H (alkane, aldehyde) and S–H stretch",13,15,4,5,0,0,0.03227594325119577,0.19365565950717462
+3000–3650,3000,3650,"O–H, N–H and sp²/sp C–H stretch",16,19,5,16,0,1,0.013708039898450604,0.098984586016997
