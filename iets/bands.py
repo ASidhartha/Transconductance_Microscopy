@@ -7,4 +7,6 @@ BANDS = {
     "Amide C=O": (1630, 1695),
     "Isothiocyanate N=C=S": (1990, 2140),
     "Thiocyanate S-C≡N": (2140, 2175),
+    "S-O stretch (sulfonate/sulfate)": (1030, 1270),
+    "S=O asym. stretch (sulfonate/sulfate)": (1335, 1415),
 }

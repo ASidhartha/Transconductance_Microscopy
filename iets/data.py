@@ -56,10 +56,12 @@ def read_csv(path: str) -> pd.DataFrame:
         df["d2_ss"] = df["d2_s"]
     df = df.dropna(subset=["wavenumber", "voltage", "current"]).reset_index(drop=True).astype(float)
     # The derivative columns are derivatives per SAMPLE (MATLAB-style gradient with unit spacing),
-    # not per volt: DerivativeY1 == gradient(Current) exactly. The voltage step differs between
-    # files (1.0-1.25 mV), so convert to A/V and A/V^2 with the local step (median-smoothed, since
-    # the recorded voltages are averages of repeated sweeps and jitter slightly).
-    step = pd.Series(np.gradient(df.voltage.values)).rolling(21, center=True, min_periods=1).median().values
+    # not per volt: DerivativeY1 == gradient(Current) exactly, so they are divided by the voltage
+    # step. Every file spans -0.5..+0.5 V in 800 points (mean step 1.25 mV), but in ten impure
+    # files (row 1) the recorded voltage is quantised to 1 mV and the steps run 1, 1, 1, 2 mV. A
+    # median of the step gives 1.0 or 1.5 mV there, so the step is taken as the secant slope over
+    # 40 samples (a multiple of the 4-sample pattern), which is 1.25 mV for these files too.
+    step = local_step(df.voltage.values)
     for c in ("d1", "d1_s"):
         if c in df:
             df[c] = df[c] / step
@@ -67,6 +69,13 @@ def read_csv(path: str) -> pd.DataFrame:
         if c in df:
             df[c] = df[c] / step**2
     return df
+
+
+def local_step(v: np.ndarray, h: int = 20) -> np.ndarray:
+    """Voltage step per sample, averaged over 2h samples (secant slope of V against sample index)."""
+    i = np.arange(len(v))
+    lo, hi = np.clip(i - h, 0, len(v) - 1), np.clip(i + h, 0, len(v) - 1)
+    return (v[hi] - v[lo]) / (hi - lo)
 
 
 def parse_pair(name: str):

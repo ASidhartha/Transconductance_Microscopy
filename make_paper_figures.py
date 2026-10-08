@@ -2,7 +2,7 @@
 
     .venv/bin/python make_paper_figures.py
 
-Run after train.py, evaluate.py, apply.py, make_report_figures.py and polarity_check.py.
+Run after train.py, evaluate.py, apply.py, make_report_figures.py, polarity_check.py and alpha_analysis.py.
 """
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 from scipy.interpolate import griddata
 from scipy.stats import binomtest
 
+from iets.alpha import is_diagonal, k0, pair_length
 from iets.analysis import load_model, savgol, unet
 from iets.data import duplicated_pairs, read_csv, DEVICES
 from iets.pipeline import prepare_all
@@ -224,61 +226,214 @@ for ax in axes[-1]:
 fig.text(0.0, 0.5, "d$^2$I/dV$^2$ (nA V$^{-2}$)", rotation=90, va="center", fontsize=7)
 save(fig, "fig_before_after")
 
-# =============================================================== Figure 4: signed band maps
+# =============================================================== Figures 4-6: signed band maps and alpha
 MAP_BANDS = [("C=C / amide C=O", 1600, 1695), ("N=C=S", 1990, 2140),
              ("S–C≡N", 2140, 2175), ("carboxylic O–H", 2500, 3300)]
+SULFUR_BANDS = [("S–O stretch", 1030, 1270), ("S=O asym. stretch", 1335, 1415)]   # sulfonate / sulfate
+K2 = np.array([2 * k0(s.node_a, s.node_b) for s in S])       # 2 K0 per spectrum (A/V^2)
 xi, yi = np.meshgrid(np.linspace(1, 5, 120), np.linspace(1, 4, 90))
-fig, axes = plt.subplots(len(MAP_BANDS), 2, figsize=(5.4, 1.7 * len(MAP_BANDS) + 0.4),
-                         gridspec_kw=dict(hspace=0.3, wspace=0.08))
 map_stats = {}
-for r, (name, lo, hi) in enumerate(MAP_BANDS):
+
+
+def band_values(Z, dev, lo, hi):
+    """Per electrode pair: signed signal of largest magnitude in the band, averaged over the two
+    halves (A/V^2); whether both halves agree in sign there; pair midpoints; spectrum indices."""
     m = (GRID >= lo) & (GRID <= hi)
-    vals, agree, mids = {}, {}, {}
-    for dev in ("pure", "impure"):
-        idx = [i for i, s in enumerate(S) if s.device == dev]
-        v, ag = [], []
-        for i in idx:
-            y = D[i][:, m]
-            avg = (y[0] + y[1]) / 2                          # mirrored halves, even convention
-            j = int(np.argmax(np.abs(avg)))
-            v.append(avg[j] * SC[i] * 1e9)
-            ag.append(np.sign(y[0, j]) == np.sign(y[1, j]) and abs(avg[j]) > 0)
-        vals[dev], agree[dev], mids[dev] = np.array(v), np.array(ag), np.array([S[i].midpoint for i in idx])
-        ok = agree[dev] & ~np.isin([S[i].pair for i in idx], list(DUP))
-        npos, nneg = int((vals[dev][ok] > 0).sum()), int((vals[dev][ok] < 0).sum())
-        map_stats[f"{dev}/{name}"] = dict(
-            n=len(idx), n_sign_agree=int(ok.sum()), pos_agree=npos, neg_agree=nneg,
-            p_sign=float(binomtest(npos, npos + nneg).pvalue) if npos + nneg else 1.0,
-            median_nA=float(np.median(vals[dev])))
-    vmax = max(np.percentile(np.abs(vals[d]), 95) for d in vals)
-    for c, dev in enumerate(("pure", "impure")):
-        ax = axes[r, c]
-        zi = griddata(mids[dev], vals[dev], (xi, yi), method="cubic")
-        cf = ax.contourf(xi, yi, np.clip(zi, -vmax, vmax), np.linspace(-vmax, vmax, 17), cmap="RdBu_r", extend="both")
-        good = agree[dev]
-        ax.plot(*mids[dev][good].T, "o", ms=2.2, color="k", mew=0)
-        ax.plot(*mids[dev][~good].T, "x", ms=3.2, color="k", mew=0.6)
-        ax.set_aspect("equal")
-        ax.set_xticks([1, 2, 3, 4, 5])
-        ax.set_yticks([1, 2, 3, 4])
-        if c == 1:
-            ax.set_yticklabels([])
-        if r == len(MAP_BANDS) - 1:
-            ax.set_xlabel("X")
-        if c == 0:
-            ax.set_ylabel("Y")
-        if r == 0:
-            ax.set_title(f"{dev} device", fontsize=7.5, fontweight="bold")
-        if c == 0:
-            ax.text(-0.32, 0.5, f"{name}\n{lo}–{hi} cm$^{{-1}}$", transform=ax.transAxes, rotation=90,
-                    ha="center", va="center", fontsize=6.5)
-    cb = fig.colorbar(cf, ax=axes[r, :], shrink=0.9, pad=0.02)
-    cb.set_label("nA V$^{-2}$", fontsize=6)
+    idx = [i for i, s in enumerate(S) if s.device == dev]
+    v, ag = [], []
+    for i in idx:
+        y = Z[i][:, m] * MASK[i][:, m]
+        avg = (y[0] + y[1]) / 2                          # mirrored halves, even convention
+        j = int(np.argmax(np.abs(avg)))
+        v.append(avg[j] * SC[i])
+        ag.append(np.sign(y[0, j]) == np.sign(y[1, j]) and abs(avg[j]) > 0)
+    return np.array(v), np.array(ag), np.array([S[i].midpoint for i in idx]), np.array(idx)
+
+
+def sign_stats(name, dev, vals, agree, idx):
+    ok = agree & ~np.isin([S[i].pair for i in idx], list(DUP))
+    npos, nneg = int((vals[ok] > 0).sum()), int((vals[ok] < 0).sum())
+    map_stats[f"{dev}/{name}"] = dict(
+        n=len(idx), n_sign_agree=int(ok.sum()), pos_agree=npos, neg_agree=nneg,
+        p_sign=float(binomtest(npos, npos + nneg).pvalue) if npos + nneg else 1.0,
+        median_nA=float(np.median(vals * 1e9)), median_abs_alpha=float(np.median(np.abs(vals / K2[idx]))))
+
+
+def draw_map(ax, mids, vals, agree, vmax):
+    zi = griddata(mids, vals, (xi, yi), method="cubic")
+    cf = ax.contourf(xi, yi, np.clip(zi, -vmax, vmax), np.linspace(-vmax, vmax, 17), cmap="RdBu_r", extend="both")
+    ax.plot(*mids[agree].T, "o", ms=2.2, color="k", mew=0)
+    ax.plot(*mids[~agree].T, "x", ms=3.2, color="k", mew=0.6)
+    ax.set_aspect("equal")
+    ax.set_xticks([1, 2, 3, 4, 5])
+    ax.set_yticks([1, 2, 3, 4])
+    return cf
+
+
+def map_colorbar(fig, cf, axes, vmax, label):
+    cb = fig.colorbar(cf, ax=axes, shrink=0.9, pad=0.02)
+    t = MaxNLocator(nbins=4, symmetric=True).tick_values(-vmax, vmax)
+    cb.set_ticks(t[np.abs(t) <= vmax * 1.0001])
+    cb.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+    cb.set_label(label, fontsize=6)
     cb.ax.tick_params(labelsize=5.5)
-fig.text(0.45, 0.04, "●  both bias halves agree in sign    ×  halves disagree (sign not reproducible)",
-         ha="center", fontsize=6.5)
-save(fig, "fig_maps")
+
+
+def map_grid(rows, fname, width=5.4, row_h=1.7, legend_y=0.04):
+    """rows: list of (row label, {dev: (vals, agree, mids)}, scale, colourbar label); columns pure, impure."""
+    fig, axes = plt.subplots(len(rows), 2, figsize=(width, row_h * len(rows) + 0.4),
+                             gridspec_kw=dict(hspace=0.3, wspace=0.08), squeeze=False)
+    for r, (label, data, scale, cb_label) in enumerate(rows):
+        vmax = max(np.percentile(np.abs(data[d][0]), 95) for d in data) * scale
+        for c, dev in enumerate(("pure", "impure")):
+            ax = axes[r, c]
+            vals, agree, mids = data[dev]
+            cf = draw_map(ax, mids, vals * scale, agree, vmax)
+            if c == 1:
+                ax.set_yticklabels([])
+            else:
+                ax.set_ylabel("Y")
+                ax.text(-0.36 - 0.04 * label.count("\n"), 0.5, label, transform=ax.transAxes, rotation=90,
+                        ha="center", va="center", fontsize=6.5)
+            if r == len(rows) - 1:
+                ax.set_xlabel("X")
+            if r == 0:
+                ax.set_title(f"{dev} device", fontsize=7.5, fontweight="bold")
+        map_colorbar(fig, cf, axes[r, :], vmax, cb_label)
+    fig.text(0.45, legend_y, "●  both bias halves agree in sign    ×  halves disagree (sign not reproducible)",
+             ha="center", fontsize=6.5)
+    save(fig, fname)
+
+
+# Figure 4: signed transconductance maps of the main bands (denoised)
+rows = []
+for name, lo, hi in MAP_BANDS:
+    data = {}
+    for dev in ("pure", "impure"):
+        vals, agree, mids, idx = band_values(D, dev, lo, hi)
+        sign_stats(name, dev, vals, agree, idx)
+        data[dev] = (vals, agree, mids)
+    rows.append((f"{name}\n{lo}–{hi} cm$^{{-1}}$", data, 1e9, "nA V$^{-2}$"))
+map_grid(rows, "fig_maps")
+
+# Figure 5: sulfonate / sulfate bands, transconductance and alpha (denoised)
+rows = []
+for name, lo, hi in SULFUR_BANDS:
+    dT, dA = {}, {}
+    for dev in ("pure", "impure"):
+        vals, agree, mids, idx = band_values(D, dev, lo, hi)
+        sign_stats(name, dev, vals, agree, idx)
+        dT[dev] = (vals, agree, mids)
+        dA[dev] = (vals / K2[idx], agree, mids)
+    short = name
+    rows.append((f"{short}\n{lo}–{hi} cm$^{{-1}}$\nd$^2$I/dV$^2$", dT, 1e9, "d$^2$I/dV$^2$ (nA V$^{-2}$)"))
+    rows.append((f"{short}\n{lo}–{hi} cm$^{{-1}}$\nα", dA, 1e3, "α (10$^{-3}$)"))
+map_grid(rows, "fig_sulfur_maps", row_h=1.6, legend_y=0.05)
 json.dump(map_stats, open("outputs/report/map_sign_stats.json", "w"), indent=1)
+
+# Supplementary: alpha maps of all bands, before (measured, detrended) and after denoising
+for dev in ("pure", "impure"):
+    fig, axes = plt.subplots(len(MAP_BANDS) + len(SULFUR_BANDS), 2, figsize=(5.4, 9.6),
+                             gridspec_kw=dict(hspace=0.3, wspace=0.08))
+    for r, (name, lo, hi) in enumerate(MAP_BANDS + SULFUR_BANDS):
+        before, after = band_values(X, dev, lo, hi), band_values(D, dev, lo, hi)
+        vmax = max(np.percentile(np.abs(b[0] / K2[b[3]]), 95) for b in (before, after)) * 1e3
+        for c, (vals, agree, mids, idx) in enumerate((before, after)):
+            ax = axes[r, c]
+            cf = draw_map(ax, mids, vals / K2[idx] * 1e3, agree, vmax)
+            if c == 1:
+                ax.set_yticklabels([])
+            else:
+                ax.set_ylabel("Y")
+                ax.text(-0.4, 0.5, f"{name}\n{lo}–{hi} cm$^{{-1}}$", transform=ax.transAxes,
+                        rotation=90, ha="center", va="center", fontsize=6)
+            if r == 0:
+                ax.set_title(("before denoising (measured)", "after denoising")[c], fontsize=7.5, fontweight="bold")
+        axes[-1, 0].set_xlabel("X")
+        axes[-1, 1].set_xlabel("X")
+        map_colorbar(fig, cf, axes[r, :], vmax, "α (10$^{-3}$)")
+    fig.text(0.45, 0.06, f"{dev} device.  ●  halves agree in sign    ×  halves disagree", ha="center", fontsize=6.5)
+    save(fig, f"S_alpha_maps_{dev}")
+
+# Figure 6: alpha before and after denoising, and its relation to d2I/dV2
+pa = pd.read_csv("outputs/alpha/peaks_alpha.csv")
+fig = plt.figure(figsize=(7.2, 5.0))
+gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.05], hspace=0.55, wspace=0.3)
+for c, dev in enumerate(("pure", "impure")):
+    pair = showcase(dev, 1)[0]
+    i = idx_of[(dev, pair)]
+    s, a, k = S[i], A[i], K2[i]
+    w = s.wavenumber
+    raw = np.interp(GRID, w[w > 0], s.d2[w > 0])
+    bg = raw - detrend(raw)
+    w_pos = a.T((2 * GRID - a.c) / (1 + a.k))
+    ok = MASK[i][0]
+    ax = fig.add_subplot(gs[0, c])
+    keep = (w >= 100)
+    ax.plot(w[keep], s.d2[keep] / k * 1e3, color=C_POS_L, lw=0.8, label="original (measured)")
+    ax.plot(w_pos[ok], (D[i][0][ok] * SC[i] + np.interp(w_pos[ok], GRID, bg)) / k * 1e3, color=C_POS, lw=1.1,
+            label="denoised")
+    ax.plot(GRID, bg / k * 1e3, color="0.45", lw=0.6, ls="--", label="background")
+    ax.axhline(0, color="0.3", lw=0.4)
+    for pk in peaks[(peaks.device == dev) & (peaks.pair == pair) & (peaks.tier == "confirmed")].itertuples():
+        ax.axvline(pk.wavenumber_pos_axis, color="k", lw=0.5, alpha=0.5)
+    win = (w >= 200) & (w <= 3648)
+    lim = np.abs(s.d2[win]).max() / k * 1e3 * 1.15
+    ax.set_ylim(-lim, lim)
+    ax.set_xlim(100, 3900)
+    ax.set_xlabel("wavenumber, +V axis (cm$^{-1}$)")
+    ax.set_ylabel("α (10$^{-3}$)")
+    L = pair_length(s.node_a, s.node_b) * 10
+    panel(ax, "ab"[c], f"{dev} device, pair {pair} (L = {L:.1f} mm)")
+    if c == 0:
+        ax.legend(frameon=False, loc="upper right", fontsize=6)
+
+ax = fig.add_subplot(gs[1, 0])
+for diag, col, lab in ((False, C_POS, "side pairs, L = 2 mm"), (True, C_NEG, "diagonal pairs, L = 2.83 mm")):
+    xs, ys = [], []
+    for i, s in enumerate(S):
+        if is_diagonal(s.node_a, s.node_b) != diag:
+            continue
+        w = s.wavenumber
+        m = (w >= 200) & (w <= 3648)
+        xs.append(np.abs(s.d2[m]))
+        ys.append(np.abs(s.d2[m]) / K2[i])
+    xs, ys = np.concatenate(xs), np.concatenate(ys)
+    kk = k0(*(((1, 1), (2, 2)) if diag else ((1, 1), (1, 2))))
+    ax.scatter(xs[::5] * 1e9, ys[::5], s=4, color=col, alpha=0.35, lw=0, rasterized=True,
+               label=f"{lab}, K$_0$ = {kk * 1e6:.1f} µA V$^{{-2}}$")
+    g = np.logspace(-1.5, 4.5, 10)
+    ax.plot(g, g * 1e-9 / (2 * kk), color="k", lw=0.5, ls=(0, (4, 3)))
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(1e-1, 1e4)
+ax.set_ylim(1e-7, 1)
+ax.set_xlabel("|d$^2$I/dV$^2$| (nA V$^{-2}$)")
+ax.set_ylabel("|α|")
+ax.legend(frameon=False, loc="lower right", fontsize=6, markerscale=3)
+panel(ax, "c", "α = (d$^2$I/dV$^2$)/(2K$_0$), all measured points")
+
+ax = fig.add_subplot(gs[1, 1])
+hc = pa[~pa.confidence.str.startswith("tentative") & ~pa.duplicated_across_devices]
+pos = {"pure": (0.8, 1.2), "impure": (2.0, 2.4)}
+for dev in ("pure", "impure"):
+    sub = hc[hc.device == dev]
+    for x0, colname, col in ((pos[dev][0], "alpha_measured", C_POS_L if dev == "pure" else C_NEG_L),
+                             (pos[dev][1], "alpha_denoised", DEV_COL[dev])):
+        v = sub[colname].values
+        jit = np.random.default_rng(0).uniform(-0.12, 0.12, len(v))
+        ax.scatter(x0 + jit, v, s=3, color=col, lw=0, alpha=0.6)
+        ax.plot([x0 - 0.16, x0 + 0.16], [np.median(v)] * 2, color="k", lw=1.2)
+        ax.text(x0, 60, f"{np.median(v) * 1e3:.1f}", ha="center", fontsize=6)
+ax.set_yscale("log")
+ax.set_ylim(3e-5, 200)
+ax.set_xticks([0.8, 1.2, 2.0, 2.4])
+ax.set_xticklabels(["measured", "denoised", "measured", "denoised"], fontsize=6)
+ax.text(1.0, -0.2, "pure", transform=ax.get_xaxis_transform(), ha="center", fontsize=6.5)
+ax.text(2.2, -0.2, "impure", transform=ax.get_xaxis_transform(), ha="center", fontsize=6.5)
+ax.set_ylabel("|α| at the peak")
+panel(ax, "d", "high-confidence peaks (medians in 10$^{-3}$)")
+save(fig, "fig_alpha")
 
 # =============================================================== Supplementary figures (copied)
 for src, dst in [("outputs/report/fig01_raw_examples.png", "S_raw_examples.png"),
@@ -324,3 +479,60 @@ fig.tight_layout()
 save(fig, "S_noise")
 print("wrote", FIG, sorted(os.listdir(FIG)))
 print(json.dumps(map_stats, indent=1))
+
+# =============================================================== Supplementary layout schematics (Notes 2-3)
+# Drawn from the measured electrode pairs: node "XY" in a file name XY_X'Y' sits at (X, Y) on the 2 mm grid,
+# with the same axes as the band maps.
+nodes = sorted({n for s in S for n in (s.node_a, s.node_b)})
+pair_set = sorted({(s.node_a, s.node_b) for s in S})
+deg = {n: sum(n in p for p in pair_set) for n in nodes}
+DEG_COL = {3: "#7a7a7a", 5: C_POS, 8: C_NEG}
+
+
+def grid_axes(ax):
+    ax.set_xlim(0.4, 5.6)
+    ax.set_ylim(0.4, 4.6)
+    ax.set_aspect("equal")
+    ax.set_xticks([1, 2, 3, 4, 5])
+    ax.set_yticks([1, 2, 3, 4])
+    ax.set_xlabel("X (electrode index; pitch 2 mm)")
+    ax.set_ylabel("Y (electrode index)")
+
+
+fig, ax = plt.subplots(figsize=(3.6, 3.0))
+for n in nodes:
+    ax.add_patch(plt.Circle(n, 0.16, color="#b8b8b8", ec="0.3", lw=0.6, zorder=3))
+    ax.text(n[0], n[1] - 0.3, f"{n[0]}{n[1]}", ha="center", va="top", fontsize=6)
+ax.annotate("", xy=(2, 4.35), xytext=(1, 4.35), arrowprops=dict(arrowstyle="<->", lw=0.6))
+ax.text(1.5, 4.42, "2 mm", ha="center", va="bottom", fontsize=6)
+grid_axes(ax)
+ax.set_title(f"{len(nodes)} silver electrodes, 5 × 4 grid", fontsize=7)
+save(fig, "S_electrode_grid")
+
+fig, ax = plt.subplots(figsize=(3.6, 3.0))
+for a, b in pair_set:
+    ax.plot([a[0], b[0]], [a[1], b[1]], color="0.85", lw=0.6, zorder=1)
+for centre in ((1, 1), (3, 1), (3, 3)):
+    for a, b in pair_set:
+        if centre in (a, b):
+            ax.plot([a[0], b[0]], [a[1], b[1]], color=DEG_COL[deg[centre]], lw=1.4, zorder=2)
+for n in nodes:
+    ax.add_patch(plt.Circle(n, 0.13, color=DEG_COL[deg[n]], ec="white", lw=0.5, zorder=3))
+for k, lab in ((3, "corner: 3 neighbours"), (5, "edge: 5 neighbours"), (8, "interior: 8 neighbours")):
+    ax.plot([], [], "o", color=DEG_COL[k], ms=4, label=lab)
+ax.legend(frameon=False, fontsize=5.5, loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3, handletextpad=0.2)
+grid_axes(ax)
+ax.set_title("each electrode is paired with every nearest neighbour", fontsize=7)
+save(fig, "S_probing_scheme")
+
+fig, ax = plt.subplots(figsize=(3.6, 3.0))
+for a, b in pair_set:
+    ax.plot([a[0], b[0]], [a[1], b[1]], color="0.85", lw=0.6, zorder=1)
+for n in nodes:
+    ax.add_patch(plt.Circle(n, 0.13, color="#b8b8b8", ec="0.3", lw=0.5, zorder=2))
+mids = np.array([((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in pair_set])
+ax.plot(*mids.T, "x", color=C_NEG, ms=4, mew=1.0, zorder=3)
+grid_axes(ax)
+ax.set_title(f"{len(pair_set)} measured electrode pairs (× at each pair midpoint)", fontsize=7)
+save(fig, "S_pair_midpoints")
+print("layout schematics:", len(nodes), "nodes,", len(pair_set), "pairs, neighbours", sorted(set(deg.values())))

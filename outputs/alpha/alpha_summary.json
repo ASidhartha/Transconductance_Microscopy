@@ -1,0 +1,37 @@
+{
+ "pure": {
+  "n_pairs": 54,
+  "n_peaks_high": 117,
+  "alpha_peak_denoised_median": 0.007610235545023981,
+  "alpha_peak_denoised_iqr": [
+   0.00339659584147449,
+   0.016049760421611523
+  ],
+  "alpha_peak_measured_median": 0.009017009034057565,
+  "alpha_spectrum_original_median": 0.0011977515497508693,
+  "alpha_spectrum_original_p99": 0.027276569236900198,
+  "alpha_denoised_median": 5.892854683198633e-05,
+  "alpha_max_original": 0.2599425273492559
+ },
+ "impure": {
+  "n_pairs": 54,
+  "n_peaks_high": 205,
+  "alpha_peak_denoised_median": 0.01581877552768554,
+  "alpha_peak_denoised_iqr": [
+   0.006416143463262439,
+   0.03476376849323765
+  ],
+  "alpha_peak_measured_median": 0.017131936463021854,
+  "alpha_spectrum_original_median": 0.002016423911680753,
+  "alpha_spectrum_original_p99": 0.061803464983907416,
+  "alpha_denoised_median": 0.00013295865764300225,
+  "alpha_max_original": 0.13185081519796096
+ },
+ "ratio_impure_to_pure_peak_alpha": 2.0786183862638503,
+ "K0_straight": 2.7669336914999997e-05,
+ "K0_diagonal": 1.956517576353176e-05,
+ "theta1_correction_median": {
+  "pure": 0.0013598939503229527,
+  "impure": 0.004701807792615499
+ }
+}

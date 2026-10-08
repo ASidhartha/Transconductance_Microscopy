@@ -84,11 +84,14 @@ data/
   files in `data/` has this layout).
 - **Units.** The derivative columns are derivatives *per sample*, not per volt
   (`DerivativeY1` equals MATLAB/NumPy `gradient(Current)` with unit spacing exactly). The
-  loader divides them by the local voltage step (and its square) to give A/V and A/V². This
-  matters because the step is 1.25 mV in most files but 0.9–1.0 mV in ten impure files
-  (rows 1x), which would otherwise distort amplitude comparisons between pairs by up to ~1.9×.
-- **`Alpha` column.** It equals (d²I/dV²)/(dI/dV) up to a file-specific constant and is filled
-  for V > 0 only. See `polarity_check.py` and section 8 for why the −V half is still needed.
+  loader divides them by the voltage step averaged over 40 samples (and its square) to give
+  A/V and A/V². The mean step is 1.25 mV in every file. In ten impure files (row 1) the voltage
+  is recorded on a 1 mV grid, so single steps go 1, 1, 1, 2 mV; a median step (1.0 mV) would
+  overstate d²I/dV² there by 1.56×.
+- **`Alpha` column.** In `data/` it equals (d²I/dV²)/(dI/dV) up to a file-specific constant and
+  is filled for V > 0 only. It is not used. The coupling coefficient α = (d²I/dV²)/(2K₀) of the
+  manuscript is computed by `alpha_analysis.py` (section 4). `matlab/alpha_calculation_updated.m`
+  is the equivalent MATLAB script (2 mm electrode pitch), corrected to use the mean voltage step.
 - **Adding a device:** add its folder to `DEVICES` in `iets/data.py`, then re-run
   `train.py`, `evaluate.py` and `apply.py`.
 
@@ -106,7 +109,8 @@ does not sleep during them (sleeping slowed training 10-fold in testing).
 | 3. Apply | `.venv/bin/python apply.py` | ~2 min | denoised spectra, `peaks.csv`, spectra and heatmap PDFs |
 | 4. Report figures | `.venv/bin/python make_report_figures.py` | ~3 min | `outputs/report/`: figures, region and bond summaries |
 | 4b. ±V polarity test | `.venv/bin/python polarity_check.py` | ~4 min | `outputs/polarity/`: does the −V half carry the same spectrum? |
-| 4c. Manuscript figures | `.venv/bin/python make_paper_figures.py` | ~1 min | `outputs/paper_figures/` |
+| 4c. Coupling coefficient α | `.venv/bin/python alpha_analysis.py` | ~1 min | `outputs/alpha/`: α = (d²I/dV²)/(2K₀) before and after denoising |
+| 4d. Manuscript figures | `.venv/bin/python make_paper_figures.py` | ~1 min | `outputs/paper_figures/` |
 | 5. Word report | see below | seconds | `outputs/IETS_Denoising_Report.docx` |
 
 Step 3 reads the thresholds written by step 2, so run them in order.
@@ -170,6 +174,19 @@ magnitude in that band, averaged over the two halves. Magnitude is used because 
 is not consistent between halves. **●** marks a confirmed peak in the band and **□** a
 single-half peak.
 
+### `outputs/alpha/`: coupling coefficient α
+α = (d²I/dV²)/(2K₀) with K₀ = μ₀C_ox·W/L (constants in `iets/alpha.py`; L = 2 mm for side
+pairs and 2.83 mm for diagonal pairs, so K₀ = 27.7 and 19.6 µA/V²).
+- `<device>/<pair>.csv`: measured and denoised α of both halves on the common axis.
+- `alpha_spectra_<device>.pdf`: for every pair, the original α of the +V half (as the MATLAB
+  script computes it) and the denoised α with the removed background added back.
+- `peaks_alpha.csv`: `peaks.csv` plus K₀, pair length and α at each peak (measured and denoised).
+- `alpha_summary.json`: the device statistics quoted in the manuscript.
+- `matlab_check.csv`: the original MATLAB `Alpha` output divided by the α computed here, per
+  file (100 of 110 agree within 0.2%; the ten row-1 impure files differ by 1.56×, the
+  median-step error fixed in `matlab/`). Regenerated only if the MATLAB output is present in
+  `Alpha_2mm/`.
+
 ### Other files
 - `outputs/metrics.json`: benchmark numbers and tier thresholds.
 - `outputs/alignment.json`: per-spectrum stretch `k`, shift `c`, correlation and whether it was accepted.
@@ -203,7 +220,8 @@ differ from the simulation.
 
 | To change | Edit |
 |---|---|
-| Bands used for the heatmaps | `iets/bands.py` (the ranges behind the original heatmaps were not available, so these are chosen from the FTIR table) |
+| Bands used for the heatmaps | `iets/bands.py` (the ranges behind the original heatmaps were not available, so these are chosen from the FTIR table; includes two sulfonate/sulfate windows) |
+| Constants for α (μ₀, ε_r, t_ox, W, electrode pitch) | `iets/alpha.py` |
 | FTIR bond table | `iets/ftir_bands.csv` (extracted automatically from instanano.com; worth spot-checking) |
 | Analysis window (200–3648 cm⁻¹) | `GRID` in `iets/preprocess.py` (keep the length divisible by 16; retraining needed) |
 | Alignment strictness | `NULL_Q` in `iets/pipeline.py` (default 95; lower aligns more spectra but admits more chance alignments). Delete `outputs/alignment.json` afterwards |
@@ -229,10 +247,13 @@ differ from the simulation.
    impure one. 41 of 110 spectra could be aligned individually. Peak positions carry a
    median uncertainty of ±117 cm⁻¹ (impure) and ±35 cm⁻¹ (pure).
 4. **Positive bias alone is not enough.** The `Alpha` column is filled for V > 0 only. Only
-   58–61% of the peaks in the denoised +V half are reproduced in the −V half, and +V-only
+   58–62% of the peaks in the denoised +V half are reproduced in the −V half, and +V-only
    positions are biased by a median of +35 cm⁻¹ (pure) and +110 cm⁻¹ (impure). Always
    analyse both halves.
-5. **The data was already smoothed before analysis**, so the noise is smooth and peak-like
+5. **Current jumps in impure pair `22_33`.** The −V current jumps abruptly at −0.354, −0.387 and
+   −0.436 V (30–45× the typical step), so its −V half has |d²I/dV²| ≈ 500× the +V half above
+   ~2500 cm⁻¹ and measured |α| up to 19.
+6. **The data was already smoothed before analysis**, so the noise is smooth and peak-like
    (correlation half-width ≈ 56 cm⁻¹). This limits what any denoiser can do. Unsmoothed
    I–V exports would help.
 
@@ -267,7 +288,7 @@ differ from the simulation.
 - **Validation:** on simulated data, peak-finding F1 is 0.76 for the U-Net versus 0.61 for
   Savitzky–Golay smoothing. On real data, where there is no ground truth, each half is
   denoised on its own and the peaks are compared between halves. The U-Net is best at every
-  operating point. The gain is largest at 4–5 peaks per half (+0.06 over Savitzky–Golay) and
+  operating point. The gain is largest at 4–5 peaks per half (+0.06–0.07 over Savitzky–Golay) and
   negligible at 2–3 peaks. See section 5 of the report.
 
 ---
@@ -284,6 +305,7 @@ differ from the simulation.
 ├── apply.py                  run on all spectra, write outputs
 ├── make_report_figures.py    figures and summary tables for the report
 ├── polarity_check.py         does the mirrored −V half carry the same spectrum?
+├── alpha_analysis.py         coupling coefficient α before and after denoising -> outputs/alpha/
 ├── make_paper_figures.py     manuscript + SI figures -> outputs/paper_figures/
 ├── report/build_report.js    builds the Word report
 ├── iets/
@@ -295,8 +317,10 @@ differ from the simulation.
 │   ├── model.py              1D U-Net
 │   ├── analysis.py           denoising, peak tiers, bond matching
 │   ├── bands.py              heatmap bands
+│   ├── alpha.py              K₀ and α for the 2 mm electrode geometry
 │   └── ftir_bands.csv        FTIR functional-group table
 ├── data/                     input spectra (impure/, pure/), 55 electrode pairs each
+├── matlab/                   MATLAB α script (2 mm pitch, mean voltage step)
 ├── models/                   trained weights (unet_2branch.pt, unet_1branch.pt), simulated test set
 └── outputs/                  all results (see section 5); polarity/ for the ±V test,
                               paper_figures/ for manuscript figures
