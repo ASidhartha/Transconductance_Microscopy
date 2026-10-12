@@ -42,9 +42,11 @@ def panel(ax, letter, title=""):
     ax.set_title(f"$\\bf{{{letter}}}$  {title}", loc="left")
 
 
-def save(fig, name):
+def save(fig, name, png=None):
+    """PDF into the manuscript figure folder; optionally a PNG copy elsewhere (e.g. for the Word report)."""
     fig.savefig(f"{FIG}/{name}.pdf")
-    fig.savefig(f"{FIG}/{name}.png", dpi=200)
+    if png:
+        fig.savefig(png, dpi=200)
     plt.close(fig)
 
 
@@ -141,7 +143,7 @@ ax.set_xlabel("best displacement per electrode pair (cm$^{-1}$)")
 ax.set_ylabel("electrode pairs")
 ax.legend(frameon=False, loc="upper left")
 panel(ax, "d", "per electrode pair")
-save(fig, "fig_polarity")
+save(fig, "fig_polarity", png="outputs/report/fig13_polarity.png")   # also for the Word report
 
 # =============================================================== Figure 2: benchmark
 syn = np.load("models/synth_test.npz")
@@ -226,10 +228,11 @@ for ax in axes[-1]:
 fig.text(0.0, 0.5, "d$^2$I/dV$^2$ (nA V$^{-2}$)", rotation=90, va="center", fontsize=7)
 save(fig, "fig_before_after")
 
-# =============================================================== Figures 4-6: signed band maps and alpha
+# =============================================================== Figures 4-5: signed band maps and alpha
 MAP_BANDS = [("C=C / amide C=O", 1600, 1695), ("N=C=S", 1990, 2140),
              ("S–C≡N", 2140, 2175), ("carboxylic O–H", 2500, 3300)]
-SULFUR_BANDS = [("S–O stretch", 1030, 1270), ("S=O asym. stretch", 1335, 1415)]   # sulfonate / sulfate
+# further windows, Supplementary maps only; 1030-1270 also holds the S-O stretch of sulfonate/sulfate
+EXTRA_BANDS = [("C–O stretch", 1030, 1270), ("S=O asym. stretch", 1335, 1415)]
 K2 = np.array([2 * k0(s.node_a, s.node_b) for s in S])       # 2 K0 per spectrum (A/V^2)
 xi, yi = np.meshgrid(np.linspace(1, 5, 120), np.linspace(1, 4, 90))
 map_stats = {}
@@ -259,21 +262,30 @@ def sign_stats(name, dev, vals, agree, idx):
         median_nA=float(np.median(vals * 1e9)), median_abs_alpha=float(np.median(np.abs(vals / K2[idx]))))
 
 
-def draw_map(ax, mids, vals, agree, vmax):
+def draw_map(ax, mids, vals, agree, vmax, signed=True):
     zi = griddata(mids, vals, (xi, yi), method="cubic")
-    cf = ax.contourf(xi, yi, np.clip(zi, -vmax, vmax), np.linspace(-vmax, vmax, 17), cmap="RdBu_r", extend="both")
-    ax.plot(*mids[agree].T, "o", ms=2.2, color="k", mew=0)
-    ax.plot(*mids[~agree].T, "x", ms=3.2, color="k", mew=0.6)
+    if signed:
+        cf = ax.contourf(xi, yi, np.clip(zi, -vmax, vmax), np.linspace(-vmax, vmax, 17), cmap="RdBu_r",
+                         extend="both")
+        ax.plot(*mids[agree].T, "o", ms=2.2, color="k", mew=0)
+        ax.plot(*mids[~agree].T, "x", ms=3.2, color="k", mew=0.6)
+    else:
+        cf = ax.contourf(xi, yi, np.clip(zi, 0, vmax), np.linspace(0, vmax, 17), cmap="magma_r", extend="max")
+        ax.plot(*mids.T, "o", ms=2.2, color="0.25", mew=0)
     ax.set_aspect("equal")
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.set_yticks([1, 2, 3, 4])
     return cf
 
 
-def map_colorbar(fig, cf, axes, vmax, label):
+def map_colorbar(fig, cf, axes, vmax, label, signed=True):
     cb = fig.colorbar(cf, ax=axes, shrink=0.9, pad=0.02)
-    t = MaxNLocator(nbins=4, symmetric=True).tick_values(-vmax, vmax)
-    cb.set_ticks(t[np.abs(t) <= vmax * 1.0001])
+    if signed:
+        t = MaxNLocator(nbins=4, symmetric=True).tick_values(-vmax, vmax)
+        cb.set_ticks(t[np.abs(t) <= vmax * 1.0001])
+    else:
+        t = MaxNLocator(nbins=4).tick_values(0, vmax)
+        cb.set_ticks(t[(t >= 0) & (t <= vmax * 1.0001)])
     cb.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
     cb.set_label(label, fontsize=6)
     cb.ax.tick_params(labelsize=5.5)
@@ -316,49 +328,50 @@ for name, lo, hi in MAP_BANDS:
     rows.append((f"{name}\n{lo}–{hi} cm$^{{-1}}$", data, 1e9, "nA V$^{-2}$"))
 map_grid(rows, "fig_maps")
 
-# Figure 5: sulfonate / sulfate bands, transconductance and alpha (denoised)
-rows = []
-for name, lo, hi in SULFUR_BANDS:
-    dT, dA = {}, {}
+for name, lo, hi in EXTRA_BANDS:                     # sign statistics for Supplementary Table 5.6
     for dev in ("pure", "impure"):
         vals, agree, mids, idx = band_values(D, dev, lo, hi)
         sign_stats(name, dev, vals, agree, idx)
-        dT[dev] = (vals, agree, mids)
-        dA[dev] = (vals / K2[idx], agree, mids)
-    short = name
-    rows.append((f"{short}\n{lo}–{hi} cm$^{{-1}}$\nd$^2$I/dV$^2$", dT, 1e9, "d$^2$I/dV$^2$ (nA V$^{-2}$)"))
-    rows.append((f"{short}\n{lo}–{hi} cm$^{{-1}}$\nα", dA, 1e3, "α (10$^{-3}$)"))
-map_grid(rows, "fig_sulfur_maps", row_h=1.6, legend_y=0.05)
 json.dump(map_stats, open("outputs/report/map_sign_stats.json", "w"), indent=1)
 
-# Supplementary: alpha maps of all bands, before (measured, detrended) and after denoising
-for dev in ("pure", "impure"):
-    fig, axes = plt.subplots(len(MAP_BANDS) + len(SULFUR_BANDS), 2, figsize=(5.4, 9.6),
-                             gridspec_kw=dict(hspace=0.3, wspace=0.08))
-    for r, (name, lo, hi) in enumerate(MAP_BANDS + SULFUR_BANDS):
-        before, after = band_values(X, dev, lo, hi), band_values(D, dev, lo, hi)
-        vmax = max(np.percentile(np.abs(b[0] / K2[b[3]]), 95) for b in (before, after)) * 1e3
-        for c, (vals, agree, mids, idx) in enumerate((before, after)):
-            ax = axes[r, c]
-            cf = draw_map(ax, mids, vals / K2[idx] * 1e3, agree, vmax)
-            if c == 1:
-                ax.set_yticklabels([])
-            else:
-                ax.set_ylabel("Y")
-                ax.text(-0.4, 0.5, f"{name}\n{lo}–{hi} cm$^{{-1}}$", transform=ax.transAxes,
-                        rotation=90, ha="center", va="center", fontsize=6)
-            if r == 0:
-                ax.set_title(("before denoising (measured)", "after denoising")[c], fontsize=7.5, fontweight="bold")
+# Supplementary: maps of all six bands before (measured, detrended) and after denoising, one PDF per device and
+# quantity: signed transconductance, signed alpha and |alpha|. Each row shares one colour scale.
+HEATMAPS = {  # file name: (value from band signal and 2 K0, signed, colour-bar label, title)
+    "S_transconductance_maps": (lambda v, k: v * 1e9, True, "d$^2$I/dV$^2$ (nA V$^{-2}$)",
+                                "signed transconductance d$^2$I/dV$^2$"),
+    "S_alpha_maps": (lambda v, k: v / k * 1e3, True, "α (10$^{-3}$)", "coupling coefficient α"),
+    "S_abs_alpha_maps": (lambda v, k: np.abs(v / k) * 1e3, False, "|α| (10$^{-3}$)", "|α|"),
+}
+for fname, (conv, signed, cb_label, title) in HEATMAPS.items():
+    for dev in ("pure", "impure"):
+        fig, axes = plt.subplots(len(MAP_BANDS) + len(EXTRA_BANDS), 2, figsize=(5.4, 9.6),
+                                 gridspec_kw=dict(hspace=0.3, wspace=0.08))
+        for r, (name, lo, hi) in enumerate(MAP_BANDS + EXTRA_BANDS):
+            maps = [band_values(Z, dev, lo, hi) for Z in (X, D)]
+            vmax = max(np.percentile(np.abs(conv(b[0], K2[b[3]])), 95) for b in maps)
+            for c, (vals, agree, mids, idx) in enumerate(maps):
+                ax = axes[r, c]
+                cf = draw_map(ax, mids, conv(vals, K2[idx]), agree, vmax, signed)
+                if c == 1:
+                    ax.set_yticklabels([])
+                else:
+                    ax.set_ylabel("Y")
+                    ax.text(-0.4, 0.5, f"{name}\n{lo}–{hi} cm$^{{-1}}$", transform=ax.transAxes,
+                            rotation=90, ha="center", va="center", fontsize=6)
+                if r == 0:
+                    ax.set_title(("before denoising (measured)", "after denoising")[c], fontsize=7.5,
+                                 fontweight="bold")
+            map_colorbar(fig, cf, axes[r, :], vmax, cb_label, signed)
         axes[-1, 0].set_xlabel("X")
         axes[-1, 1].set_xlabel("X")
-        map_colorbar(fig, cf, axes[r, :], vmax, "α (10$^{-3}$)")
-    fig.text(0.45, 0.06, f"{dev} device.  ●  halves agree in sign    ×  halves disagree", ha="center", fontsize=6.5)
-    save(fig, f"S_alpha_maps_{dev}")
+        fig.suptitle(f"{dev} device: {title}", fontsize=8, fontweight="bold", x=0.45, y=0.93)
+        fig.text(0.45, 0.06, "●  halves agree in sign    ×  halves disagree" if signed else "●  electrode-pair midpoints",
+                 ha="center", fontsize=6.5)
+        save(fig, f"{fname}_{dev}")
 
-# Figure 6: alpha before and after denoising, and its relation to d2I/dV2
+# Figure 5: alpha before and after denoising for the strongest pair of each device
 pa = pd.read_csv("outputs/alpha/peaks_alpha.csv")
-fig = plt.figure(figsize=(7.2, 5.0))
-gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.05], hspace=0.55, wspace=0.3)
+fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.5), gridspec_kw=dict(wspace=0.3))
 for c, dev in enumerate(("pure", "impure")):
     pair = showcase(dev, 1)[0]
     i = idx_of[(dev, pair)]
@@ -368,7 +381,7 @@ for c, dev in enumerate(("pure", "impure")):
     bg = raw - detrend(raw)
     w_pos = a.T((2 * GRID - a.c) / (1 + a.k))
     ok = MASK[i][0]
-    ax = fig.add_subplot(gs[0, c])
+    ax = axes[c]
     keep = (w >= 100)
     ax.plot(w[keep], s.d2[keep] / k * 1e3, color=C_POS_L, lw=0.8, label="original (measured)")
     ax.plot(w_pos[ok], (D[i][0][ok] * SC[i] + np.interp(w_pos[ok], GRID, bg)) / k * 1e3, color=C_POS, lw=1.1,
@@ -387,8 +400,10 @@ for c, dev in enumerate(("pure", "impure")):
     panel(ax, "ab"[c], f"{dev} device, pair {pair} (L = {L:.1f} mm)")
     if c == 0:
         ax.legend(frameon=False, loc="upper right", fontsize=6)
+save(fig, "fig_alpha")
 
-ax = fig.add_subplot(gs[1, 0])
+# Supplementary Fig. 5.13: alpha over all measured points (a) and at the high-confidence peaks (b)
+fig, (ax, bx) = plt.subplots(1, 2, figsize=(7.2, 2.6), gridspec_kw=dict(wspace=0.3))
 for diag, col, lab in ((False, C_POS, "side pairs, L = 2 mm"), (True, C_NEG, "diagonal pairs, L = 2.83 mm")):
     xs, ys = [], []
     for i, s in enumerate(S):
@@ -411,9 +426,9 @@ ax.set_ylim(1e-7, 1)
 ax.set_xlabel("|d$^2$I/dV$^2$| (nA V$^{-2}$)")
 ax.set_ylabel("|α|")
 ax.legend(frameon=False, loc="lower right", fontsize=6, markerscale=3)
-panel(ax, "c", "α = (d$^2$I/dV$^2$)/(2K$_0$), all measured points")
+panel(ax, "a", "α = (d$^2$I/dV$^2$)/(2K$_0$), all measured points")
 
-ax = fig.add_subplot(gs[1, 1])
+ax = bx
 hc = pa[~pa.confidence.str.startswith("tentative") & ~pa.duplicated_across_devices]
 pos = {"pure": (0.8, 1.2), "impure": (2.0, 2.4)}
 for dev in ("pure", "impure"):
@@ -432,8 +447,8 @@ ax.set_xticklabels(["measured", "denoised", "measured", "denoised"], fontsize=6)
 ax.text(1.0, -0.2, "pure", transform=ax.get_xaxis_transform(), ha="center", fontsize=6.5)
 ax.text(2.2, -0.2, "impure", transform=ax.get_xaxis_transform(), ha="center", fontsize=6.5)
 ax.set_ylabel("|α| at the peak")
-panel(ax, "d", "high-confidence peaks (medians in 10$^{-3}$)")
-save(fig, "fig_alpha")
+panel(ax, "b", "high-confidence peaks (medians in 10$^{-3}$)")
+save(fig, "S_alpha_scaling")
 
 # =============================================================== Supplementary figures (copied)
 for src, dst in [("outputs/report/fig01_raw_examples.png", "S_raw_examples.png"),
@@ -442,14 +457,10 @@ for src, dst in [("outputs/report/fig01_raw_examples.png", "S_raw_examples.png")
                  ("outputs/report/fig04_synthetic_example.png", "S_synthetic_example.png"),
                  ("outputs/report/fig06_before_after_pure.png", "S_before_after_pure.png"),
                  ("outputs/report/fig06_before_after_impure.png", "S_before_after_impure.png"),
-                 ("outputs/report/fig07_heatmaps_pure.png", "S_heatmaps_pure.png"),
-                 ("outputs/report/fig07_heatmaps_impure.png", "S_heatmaps_impure.png"),
                  ("outputs/report/fig08_regions.png", "S_regions.png"),
                  ("outputs/report/fig09_bond_families.png", "S_bond_families.png"),
                  ("outputs/report/fig10_spatial_peaks.png", "S_spatial_peaks.png")]:
     shutil.copy(src, f"{FIG}/{dst}")
-
-shutil.copy(f"{FIG}/fig_polarity.png", "outputs/report/fig13_polarity.png")   # for the Word report
 
 # noise statistics figure for the SI
 from iets.pipeline import residual_noise

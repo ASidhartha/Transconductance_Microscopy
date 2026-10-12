@@ -71,7 +71,7 @@
   "median_nA": 4.759727076745842,
   "median_abs_alpha": 0.000969480229695819
  },
- "pure/S\u2013O stretch": {
+ "pure/C\u2013O stretch": {
   "n": 55,
   "n_sign_agree": 40,
   "pos_agree": 25,
@@ -80,7 +80,7 @@
   "median_nA": 2.2882176091651067,
   "median_abs_alpha": 0.0003745918787043073
  },
- "impure/S\u2013O stretch": {
+ "impure/C\u2013O stretch": {
   "n": 55,
   "n_sign_agree": 43,
   "pos_agree": 24,
