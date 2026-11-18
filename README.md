@@ -174,6 +174,22 @@ magnitude in that band, averaged over the two halves. Magnitude is used because 
 is not consistent between halves. **●** marks a confirmed peak in the band and **□** a
 single-half peak.
 
+### `outputs/paper_figures/`: manuscript band maps (updated 18 November 2026)
+- `S_transconductance_maps_<device>.pdf` (main Fig. 3), `S_abs_alpha_maps_<device>.pdf`
+  (main Fig. 4) and `S_alpha_maps_<device>.pdf` (Supplementary): seven bands, now including
+  **alcohol O–H (3200–3550 cm⁻¹, H-bonded)**. Every row uses **one colour scale shared by
+  both devices** and by the before/after columns (95th percentile of |value| over the four
+  maps), so the purified and impure sheets can be compared directly. The α and |α| maps
+  carry no midpoint markers; the transconductance maps keep the sign-agreement markers
+  (● halves agree, × halves disagree).
+- `fig_group_maps.pdf` (main Fig. 5, replaces the former α-spectrum figure, which is still
+  written as `fig_alpha.pdf`): (a) denoised signed α per functional group, purified vs
+  impure, one shared colour scale per group; (b) number of electrode pairs with
+  |α| ≥ 3.4×10⁻³ (lower quartile of |α| at the purified device's confirmed peaks), by sign.
+- `outputs/report/group_map_stats.json`: the colour-scale limits, the counts behind Fig. 5b,
+  Fisher and Holm p-values, and the same counts after dividing each pair's α by its zero-bias
+  conductance relative to the purified median (`strong_Gnorm*`; Supplementary Table 5.7). `outputs/report/map_sign_stats.json`: sign statistics per band.
+
 ### `outputs/alpha/`: coupling coefficient α
 α = (d²I/dV²)/(2K₀) with K₀ = μ₀C_ox·W/L (constants in `iets/alpha.py`; L = 2 mm for side
 pairs and 2.83 mm for diagonal pairs, so K₀ = 27.7 and 19.6 µA/V²).
@@ -325,3 +341,78 @@ differ from the simulation.
 └── outputs/                  all results (see section 5); polarity/ for the ±V test,
                               paper_figures/ for manuscript figures
 ```
+
+---
+
+## 12. ALD MoS₂ repeated sweeps (added 29 October 2026)
+
+`data/mos2/` holds 11 data sets from a few-layer ALD MoS₂ film. Unlike the rGO files, they
+keep **every repeat with its time stamps**. The columns are Repeat, VAR2, Point, CH1 Voltage,
+CH1 Current and CH1 Time.
+
+| Set | Sweep | Points / step | Repeats |
+|---|---|---|---|
+| Type 1, `pos1`–`pos5` | 0 → +0.5 V | 500 / 1.00 mV | 20 |
+| Type 2, `pos1`–`pos3`, `centre1` | −0.5 → +0.5 V | 500–501 / 2.00 mV | 10 |
+| Type 2, `centre2`, `pos4` | −0.5 → +0.5 V | 800–801 / 1.25 mV | 10 (5 at `pos4`) |
+
+Every point is integrated for 0.201 s. Each repeat restarts at the low end of the sweep.
+
+```bash
+python mos2_analysis.py       # ~3 min on 8 cores -> outputs/mos2/
+python make_mos2_figures.py   # main-text Figs 3-5 and Supplementary Note 7 figures
+```
+
+What the analysis does (code in `iets/sweeps.py` and `iets/features.py`):
+
+1. **Glitches.** Single-sample spikes are flagged and interpolated.
+2. **Interference lines.** Lines in each repeat (0.29–0.37 Hz) are detected and removed by
+   complex demodulation. They are 50 Hz mains aliased by the 0.2 s sampling, and they produce the
+   regular "peaks" of the conventional spectra.
+3. **Time-locked background.** The sweep-start relaxation (τ ≈ 1.5 s and 18 s) is modelled by
+   a cubic in V plus two exponentials in t. The basis is projected out of each repeat separately.
+4. **Resolution.** Each location's resolution comes from the **half-data Fourier correlation**
+   between random halves of the repeats (cut-off at FRC = 1/3). Each repeat is then differentiated
+   with a 4th-order Whittaker smoother tuned to that cut-off.
+5. **Significance.** Within a location, significance comes from a **sign-flip permutation
+   max-statistic** on a smoothed-variance pseudo-t, calibrated on synthetic feature-free data
+   built from the location's own fluctuations.
+6. **Recurrence and polarity.** Recurrence across locations and polarity agreement are tested
+   against chance, and a Stouffer consensus is compared with a circular-shift null.
+7. **Benchmark.** Known features are injected into the measured fluctuations, and three methods
+   are compared at a matched 5% family-wise false-positive rate.
+
+Outputs in `outputs/mos2/`:
+
+| File | Contents |
+|---|---|
+| `summary.json` | numbers quoted in the manuscript |
+| `noise.csv` | per-location noise, lines, glitches, drift, resolution and thresholds |
+| `transient.csv` | relaxation fits |
+| `frc.csv` | Fourier-correlation curves |
+| `peaks.csv` | features that pass the family-wise threshold; **empty for these data** |
+| `candidates.csv` | three strongest extrema per location, with p values, polarity and recurrence |
+| `benchmark.csv` | per-feature benchmark results |
+| `spectra.npz` | arrays for the figures |
+| `mos2_tables.tex` | bodies of Supplementary Tables 7.1–7.4 |
+
+**Result in one line:** no MoS₂ feature passes the 5% family-wise threshold. The strongest
+candidate is a kink at +102 mV at Type-2 `pos4` (p_FWER = 0.09, five repeats). The usable
+resolution is 30–245 mV, against a room-temperature inelastic line width of 140 mV.
+### 12.1 Further analyses (29 October 2026, second pass)
+
+```bash
+python mos2_traps.py          # charge-trap model -> outputs/mos2/traps.csv, traps_summary.json
+python mos2_pooled.py         # pooled test for a film-wide feature -> outputs/mos2/pooled*.{csv,json}
+python rgo_classifier.py      # cross-validated rGO film classifier -> outputs/rgo_classifier/
+python make_mos2_figures.py   # run last: uses all of the above
+```
+
+- **Trap model** (`iets/traps.py`): I = G(t)·V + I₀ + Σ RC-branch currents, simulated over the
+  whole session (all repeats in order). The Bayesian information criterion selects the number
+  of branches. Validation: fit on the first half of the repeats, predict the second half.
+- **Pooled test**: template features are passed through each location's exact processing
+  (`apply_operator`) and combined by a random-effects model. The null comes from sign flips of
+  whole repeats.
+- **rGO classifier**: leave-one-electrode-position-out cross-validation; the null comes from label
+  swaps within positions.

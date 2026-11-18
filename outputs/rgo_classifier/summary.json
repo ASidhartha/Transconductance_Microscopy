@@ -1,0 +1,35 @@
+{
+ "measured spectra": {
+  "auc": 0.5836762688614541,
+  "paired_accuracy": 0.5925925925925926,
+  "p_perm": 0.11377245508982035,
+  "null_auc_95": 0.6118484224965707
+ },
+ "denoised spectra": {
+  "auc": 0.5510973936899863,
+  "paired_accuracy": 0.5370370370370371,
+  "p_perm": 0.1996007984031936,
+  "null_auc_95": 0.6056584362139917
+ },
+ "region peak presence (9 regions)": {
+  "auc": 0.687928669410151,
+  "paired_accuracy": 0.7592592592592593,
+  "p_perm": 0.001996007984031936,
+  "null_auc_95": 0.5782921810699588
+ },
+ "conductance only": {
+  "auc": 0.9866255144032923,
+  "paired_accuracy": 1.0
+ },
+ "denoised spectra, conductance regressed out": {
+  "auc": 0.3535665294924554,
+  "paired_accuracy": 0.37037037037037035,
+  "p_perm": 0.9620758483033932,
+  "null_auc_95": 0.6138888888888888
+ },
+ "denoised spectra, row 1 excluded": {
+  "auc": 0.5788221296847115,
+  "paired_accuracy": 0.5853658536585366
+ },
+ "discriminating_wavenumbers": []
+}

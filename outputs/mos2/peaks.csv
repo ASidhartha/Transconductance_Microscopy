@@ -1,0 +1,1 @@
+location,kind,V,wavenumber_cm1,sigma_V_mV,sigma_cm1,fwhm_mV,fwhm_cm1,narrower_than_thermal,amplitude_per_V,t_since_start_s,tstat,p_fwer,polarity,p_polarity,n_other_locations,n_tested,p_recurrence,q_recurrence

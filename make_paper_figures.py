@@ -1,4 +1,4 @@
-"""Main-text and Supplementary figures for the manuscript (outputs/paper_figures/).
+"""Main-text and Supplementary figures for the manuscript (outputs/paper_figures/; override with FIG_DIR).
 
     .venv/bin/python make_paper_figures.py
 
@@ -26,7 +26,7 @@ from iets.data import duplicated_pairs, read_csv, DEVICES
 from iets.pipeline import prepare_all
 from iets.preprocess import GRID, detrend
 
-FIG = "outputs/paper_figures"
+FIG = os.environ.get("FIG_DIR", "outputs/paper_figures")
 os.makedirs(FIG, exist_ok=True)
 plt.rcParams.update({"font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7, "legend.fontsize": 6.5,
                      "xtick.labelsize": 6.5, "ytick.labelsize": 6.5, "axes.spines.top": False,
@@ -230,7 +230,8 @@ save(fig, "fig_before_after")
 
 # =============================================================== Figures 4-5: signed band maps and alpha
 MAP_BANDS = [("C=C / amide C=O", 1600, 1695), ("N=C=S", 1990, 2140),
-             ("S–C≡N", 2140, 2175), ("carboxylic O–H", 2500, 3300)]
+             ("S–C≡N", 2140, 2175), ("carboxylic O–H", 2500, 3300),
+             ("alcohol O–H", 3200, 3550)]   # H-bonded alcohol/phenol O-H stretch (iets/bands.py)
 # further windows, Supplementary maps only; 1030-1270 also holds the S-O stretch of sulfonate/sulfate
 EXTRA_BANDS = [("C–O stretch", 1030, 1270), ("S=O asym. stretch", 1335, 1415)]
 K2 = np.array([2 * k0(s.node_a, s.node_b) for s in S])       # 2 K0 per spectrum (A/V^2)
@@ -262,16 +263,18 @@ def sign_stats(name, dev, vals, agree, idx):
         median_nA=float(np.median(vals * 1e9)), median_abs_alpha=float(np.median(np.abs(vals / K2[idx]))))
 
 
-def draw_map(ax, mids, vals, agree, vmax, signed=True):
+def draw_map(ax, mids, vals, agree, vmax, signed=True, markers=True):
     zi = griddata(mids, vals, (xi, yi), method="cubic")
     if signed:
         cf = ax.contourf(xi, yi, np.clip(zi, -vmax, vmax), np.linspace(-vmax, vmax, 17), cmap="RdBu_r",
                          extend="both")
-        ax.plot(*mids[agree].T, "o", ms=2.2, color="k", mew=0)
-        ax.plot(*mids[~agree].T, "x", ms=3.2, color="k", mew=0.6)
+        if markers:
+            ax.plot(*mids[agree].T, "o", ms=2.2, color="k", mew=0)
+            ax.plot(*mids[~agree].T, "x", ms=3.2, color="k", mew=0.6)
     else:
         cf = ax.contourf(xi, yi, np.clip(zi, 0, vmax), np.linspace(0, vmax, 17), cmap="magma_r", extend="max")
-        ax.plot(*mids.T, "o", ms=2.2, color="0.25", mew=0)
+        if markers:
+            ax.plot(*mids.T, "o", ms=2.2, color="0.25", mew=0)
     ax.set_aspect("equal")
     ax.set_xticks([1, 2, 3, 4, 5])
     ax.set_yticks([1, 2, 3, 4])
@@ -334,24 +337,34 @@ for name, lo, hi in EXTRA_BANDS:                     # sign statistics for Suppl
         sign_stats(name, dev, vals, agree, idx)
 json.dump(map_stats, open("outputs/report/map_sign_stats.json", "w"), indent=1)
 
-# Supplementary: maps of all six bands before (measured, detrended) and after denoising, one PDF per device and
-# quantity: signed transconductance, signed alpha and |alpha|. Each row shares one colour scale.
-HEATMAPS = {  # file name: (value from band signal and 2 K0, signed, colour-bar label, title)
+# Supplementary / main-text maps of all seven bands before (measured, detrended) and after denoising, one PDF per
+# device and quantity: signed transconductance, signed alpha and |alpha|. Each row has ONE colour scale, shared by
+# both devices and by the before/after columns (95th percentile of |value| over all four maps), so the purified and
+# impure PDFs can be compared directly. The alpha maps carry no markers.
+HEATMAPS = {  # file name: (value from band signal and 2 K0, signed, colour-bar label, title, markers)
     "S_transconductance_maps": (lambda v, k: v * 1e9, True, "d$^2$I/dV$^2$ (nA V$^{-2}$)",
-                                "signed transconductance d$^2$I/dV$^2$"),
-    "S_alpha_maps": (lambda v, k: v / k * 1e3, True, "α (10$^{-3}$)", "coupling coefficient α"),
-    "S_abs_alpha_maps": (lambda v, k: np.abs(v / k) * 1e3, False, "|α| (10$^{-3}$)", "|α|"),
+                                "signed transconductance d$^2$I/dV$^2$", True),
+    "S_alpha_maps": (lambda v, k: v / k * 1e3, True, "α (10$^{-3}$)", "coupling coefficient α", False),
+    "S_abs_alpha_maps": (lambda v, k: np.abs(v / k) * 1e3, False, "|α| (10$^{-3}$)", "|α|", False),
 }
-for fname, (conv, signed, cb_label, title) in HEATMAPS.items():
+ALL_BANDS = MAP_BANDS + EXTRA_BANDS
+BAND_MAPS = {(dev, name, z): band_values(Z, dev, lo, hi) for dev in ("pure", "impure")
+             for name, lo, hi in ALL_BANDS for z, Z in (("X", X), ("D", D))}
+scale_log = {}
+for fname, (conv, signed, cb_label, title, markers) in HEATMAPS.items():
+    vmaxes = {name: max(np.percentile(np.abs(conv(b[0], K2[b[3]])), 95)
+                        for b in (BAND_MAPS[(d, name, z)] for d in ("pure", "impure") for z in "XD"))
+              for name, _, _ in ALL_BANDS}
+    scale_log[fname] = {k: float(v) for k, v in vmaxes.items()}
     for dev in ("pure", "impure"):
-        fig, axes = plt.subplots(len(MAP_BANDS) + len(EXTRA_BANDS), 2, figsize=(5.4, 9.6),
+        fig, axes = plt.subplots(len(ALL_BANDS), 2, figsize=(5.4, 1.6 * len(ALL_BANDS)),
                                  gridspec_kw=dict(hspace=0.3, wspace=0.08))
-        for r, (name, lo, hi) in enumerate(MAP_BANDS + EXTRA_BANDS):
-            maps = [band_values(Z, dev, lo, hi) for Z in (X, D)]
-            vmax = max(np.percentile(np.abs(conv(b[0], K2[b[3]])), 95) for b in maps)
-            for c, (vals, agree, mids, idx) in enumerate(maps):
+        for r, (name, lo, hi) in enumerate(ALL_BANDS):
+            vmax = vmaxes[name]
+            for c, z in enumerate("XD"):
+                vals, agree, mids, idx = BAND_MAPS[(dev, name, z)]
                 ax = axes[r, c]
-                cf = draw_map(ax, mids, conv(vals, K2[idx]), agree, vmax, signed)
+                cf = draw_map(ax, mids, conv(vals, K2[idx]), agree, vmax, signed, markers)
                 if c == 1:
                     ax.set_yticklabels([])
                 else:
@@ -364,12 +377,103 @@ for fname, (conv, signed, cb_label, title) in HEATMAPS.items():
             map_colorbar(fig, cf, axes[r, :], vmax, cb_label, signed)
         axes[-1, 0].set_xlabel("X")
         axes[-1, 1].set_xlabel("X")
-        fig.suptitle(f"{dev} device: {title}", fontsize=8, fontweight="bold", x=0.45, y=0.93)
-        fig.text(0.45, 0.06, "●  halves agree in sign    ×  halves disagree" if signed else "●  electrode-pair midpoints",
-                 ha="center", fontsize=6.5)
+        fig.suptitle(f"{'purified' if dev == 'pure' else 'impure'} device: {title}\n"
+                     "(each row: colour scale shared with the other device)", fontsize=8, fontweight="bold",
+                     x=0.45, y=0.925)
+        if markers:
+            fig.text(0.45, 0.055, "●  halves agree in sign    ×  halves disagree", ha="center", fontsize=6.5)
         save(fig, f"{fname}_{dev}")
 
-# Figure 5: alpha before and after denoising for the strongest pair of each device
+# =============================================================== Figure 5: functional-group maps, pure vs impure
+# Signed alpha after denoising for every band, purified (top) and impure (bottom), one colour scale per group shared
+# by both devices. Panel b counts strongly coupled sites: |alpha| >= 3.4e-3, the lower quartile of |alpha| at the
+# purified device's high-confidence peaks, split by sign. Pair 53_54 (identical in both data sets) is excluded.
+GROUPS = [("alcohol O–H", "alcohol\nO–H"), ("carboxylic O–H", "carboxylic\nO–H"),
+          ("C=C / amide C=O", "C=C /\namide C=O"), ("C–O stretch", "C–O"), ("S=O asym. stretch", "S=O"),
+          ("N=C=S", "N=C=S"), ("S–C≡N", "S–C≡N")]
+BAND_LIM = {name: (lo, hi) for name, lo, hi in ALL_BANDS}
+STRONG = 3.4                                              # in units of 1e-3
+group_stats = {}
+fig = plt.figure(figsize=(7.2, 4.8))
+gs = fig.add_gridspec(3, len(GROUPS), height_ratios=[1, 1, 1.25], hspace=0.42, wspace=0.12,
+                      left=0.07, right=0.99, top=0.865, bottom=0.08)
+for c, (name, short) in enumerate(GROUPS):
+    vm = {}
+    for dev in ("pure", "impure"):
+        vals, agree, mids, idx = BAND_MAPS[(dev, name, "D")]
+        keep = ~np.isin([S[i].pair for i in idx], list(DUP))
+        vm[dev] = (vals[keep] / K2[idx][keep] * 1e3, agree[keep], mids[keep])
+    vmax = np.percentile(np.abs(np.concatenate([vm[d][0] for d in vm])), 95)
+    for r, dev in enumerate(("pure", "impure")):
+        ax = fig.add_subplot(gs[r, c])
+        a, ag, mids = vm[dev]
+        cf = draw_map(ax, mids, a, ag, vmax, True, markers=False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(True)
+            sp.set_linewidth(0.4)
+        if r == 0:
+            lo, hi = BAND_LIM[name]
+            ax.set_title(f"{short}\n{lo}–{hi}", fontsize=6.3)
+        if c == 0:
+            ax.set_ylabel("purified" if dev == "pure" else "impure", fontsize=7, fontweight="bold")
+        strong = np.abs(a) >= STRONG
+        group_stats.setdefault(name, {})[dev] = dict(
+            n=int(len(a)), strong=int(strong.sum()), strong_pos=int((a[strong] > 0).sum()),
+            strong_neg=int((a[strong] < 0).sum()), vmax_1e3=float(vmax),
+            sign_majority=float(max((a[ag] > 0).sum(), (a[ag] < 0).sum()) / max(ag.sum(), 1)))
+    cb = fig.colorbar(cf, ax=ax, orientation="horizontal", fraction=0.09, pad=0.06, aspect=12)
+    t = MaxNLocator(nbins=2, symmetric=True).tick_values(-vmax, vmax)
+    cb.set_ticks(t[np.abs(t) <= vmax * 1.0001])
+    cb.ax.xaxis.set_major_formatter(FormatStrFormatter("%g"))
+    cb.ax.tick_params(labelsize=5.2, length=1.5)
+fig.text(0.02, 0.975, "$\\bf{a}$  signed α after denoising (10$^{-3}$); each column has one colour scale shared by "
+         "both devices", fontsize=7)
+ax = fig.add_subplot(gs[2, :])
+xpos = np.arange(len(GROUPS))
+for k, dev in enumerate(("pure", "impure")):
+    x = xpos + (k - 0.5) * 0.36
+    npos = [group_stats[g][dev]["strong_pos"] for g, _ in GROUPS]
+    nneg = [group_stats[g][dev]["strong_neg"] for g, _ in GROUPS]
+    ax.bar(x, npos, 0.34, color=DEV_COL[dev], label=f"{'purified' if dev == 'pure' else 'impure'}, α > 0")
+    ax.bar(x, nneg, 0.34, bottom=npos, color="white", edgecolor=DEV_COL[dev], hatch="////", lw=0.6,
+           label=f"{'purified' if dev == 'pure' else 'impure'}, α < 0")
+    for xx, a_, b_ in zip(x, npos, nneg):
+        ax.text(xx, a_ + b_ + 0.4, f"{a_ + b_}", ha="center", fontsize=5.8)
+from scipy.stats import fisher_exact
+# robustness: repeat the count with each pair's alpha divided by its zero-bias conductance (slope of I-V within
+# +-0.1 V) relative to the median of the purified device
+G0 = np.array([np.polyfit(s.voltage[np.abs(s.voltage) < 0.1], s.current[np.abs(s.voltage) < 0.1], 1)[0] for s in S])
+G0_med = {d: float(np.median([G0[i] for i, s in enumerate(S) if s.device == d])) for d in ("pure", "impure")}
+for g, _ in GROUPS:
+    for dev in ("pure", "impure"):
+        vals, agree, mids, idx = BAND_MAPS[(dev, g, "D")]
+        keep = ~np.isin([S[i].pair for i in idx], list(DUP))
+        a = vals[keep] / K2[idx][keep] * 1e3 / (G0[idx][keep] / G0_med["pure"])
+        st = np.abs(a) >= STRONG
+        group_stats[g][dev].update(strong_Gnorm=int(st.sum()), strong_Gnorm_pos=int((a[st] > 0).sum()),
+                                   strong_Gnorm_neg=int((a[st] < 0).sum()))
+group_stats["_G0_median_uS"] = {d: v * 1e6 for d, v in G0_med.items()}
+for g, _ in GROUPS:
+    ns = [group_stats[g][d]["strong"] for d in ("pure", "impure")]
+    group_stats[g]["fisher_p"] = float(fisher_exact([[ns[0], 54 - ns[0]], [ns[1], 54 - ns[1]]])[1])
+ps = sorted((group_stats[g]["fisher_p"], g) for g, _ in GROUPS)
+running = 0.0
+for j, (p, g) in enumerate(ps):                           # Holm step-down
+    running = max(running, min(1.0, p * (len(ps) - j)))
+    group_stats[g]["holm_p"] = running
+ax.set_xticks(xpos)
+ax.set_xticklabels([s.replace("\n", " ") for _, s in GROUPS], fontsize=6.2)
+ax.set_ylabel(f"pairs with |α| ≥ {STRONG:g}×10$^{{-3}}$\n(of 54)")
+ax.set_ylim(0, 25)
+ax.legend(frameon=False, ncol=4, fontsize=5.8, loc="upper right", bbox_to_anchor=(1.0, 1.12))
+panel(ax, "b", "strongly coupled electrode pairs, split by sign")
+save(fig, "fig_group_maps")
+json.dump(dict(colour_scales_vmax=scale_log, group_maps=group_stats), open("outputs/report/group_map_stats.json", "w"),
+          indent=1)
+
+# Supplementary: alpha before and after denoising for the strongest pair of each device (former main Fig. 5)
 pa = pd.read_csv("outputs/alpha/peaks_alpha.csv")
 fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.5), gridspec_kw=dict(wspace=0.3))
 for c, dev in enumerate(("pure", "impure")):
